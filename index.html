@@ -1,327 +1,352 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Aplikasi Sewa Motor – Supabase Realtime</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sewa Motor — Supabase (Realtime + Admin/User)</title>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<!-- icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
 <style>
-  body { font-family: Arial; background:#f5f5f5; margin:0; padding:0; }
-  header { background:#1e40af; padding:15px; color:white; text-align:center; }
-  main { padding:15px; }
-  button { padding:8px 14px; margin:4px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; }
-  button.red { background:#d32f2f; }
-  .card {
-    background:white; padding:12px; border-radius:8px; border:1px solid #ccc;
-    display:flex; gap:12px; margin-bottom:12px; align-items:center;
+  :root{
+    --bg:#f6f7fb; --card:#fff; --accent:#2b7a78;
   }
-  .card img { width:120px; height:80px; border-radius:6px; object-fit:cover; }
-  #adminPanel { display:none; background:white; padding:10px; margin-top:10px; border-radius:8px; }
-  table { border-collapse:collapse; width:100%; background:white; margin-top:10px; }
-  th, td { border:1px solid #ccc; padding:6px; text-align:left; }
-  footer { background:#1e40af; color:white; text-align:center; padding:12px; margin-top:20px; }
+  body{font-family:Inter,system-ui,Arial; background:var(--bg); margin:0; padding:20px; color:#222}
+  .container{max-width:1100px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  h1{font-size:20px;margin:0}
+  .btn{background:var(--accent);color:#fff;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+  .btn.gray{background:#777}
+  .btn.danger{background:#b03}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
+  .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(20,20,60,0.06)}
+  .motor-img{height:140px;border-radius:8px;background:linear-gradient(90deg,#e8f8f7,#f0f6ff);display:flex;align-items:center;justify-content:center;font-size:48px;overflow:hidden}
+  .meta{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+  .status{padding:6px 8px;border-radius:8px;font-weight:600}
+  .available{background:#e6fff9;color:#007a5f}
+  .rented{background:#fff2f2;color:#b90909}
+  .actions{margin-top:10px;display:flex;gap:8px}
+  .small{font-size:13px;color:#666}
+  .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,10,20,0.45);z-index:10}
+  .modal.show{display:flex}
+  .dialog{background:var(--card);padding:18px;border-radius:12px;width:420px;box-shadow:0 20px 60px rgba(10,10,40,0.3);max-height:90vh;overflow:auto}
+  label{display:block;margin-top:10px;font-size:13px}
+  input[type="text"],input[type="tel"],input[type="number"],select,input[type="datetime-local"],textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #ddd;margin-top:6px}
+  .row{display:flex;gap:8px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+  .admin-panel{display:none;margin-top:18px}
+  footer{margin-top:20px;text-align:center;color:#666}
+  img.motor-thumb{width:100%;height:100%;object-fit:cover;border-radius:8px}
+  .top-right {display:flex;gap:8px;align-items:center}
+  .badge-admin{background:#333;color:#fff;padding:4px 8px;border-radius:8px;font-size:12px}
+  .user-rentals{margin-top:12px}
 </style>
 
+<!-- jsPDF & autotable -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Supabase UMD -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js/dist/umd/supabase.min.js"></script>
 </head>
 <body>
+<div class="container">
+  <header>
+    <h1>Aplikasi Sewa Motor (Supabase)</h1>
+    <div class="top-right">
+      <div id="userInfo" class="small"></div>
+      <button id="adminBtn" class="btn"><i class="fa-solid fa-lock"></i> Admin</button>
+      <button id="logoutBtn" class="btn gray" style="display:none"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+    </div>
+  </header>
 
-<header>
-  <h2>Aplikasi Sewa Motor</h2>
-  <button id="loginBtn"><i class="fa-brands fa-google"></i> Login Google</button>
-  <button id="logoutBtn" style="display:none"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
-  <button id="adminBtn"><i class="fa-solid fa-lock"></i> Admin</button><br>
-  <small id="userInfo"></small>
-</header>
+  <section>
+    <p class="small">Klik <strong>Sewa</strong> untuk memesan — update status realtime. Hanya <em>admin</em> yang dapat menambah / mengubah data motor dan melihat buku kas.</p>
 
-<main>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <button id="addBike" class="btn" style="background:#2b7a78;display:none"><i class="fa-solid fa-plus"></i> Tambah Motor</button>
+      <button id="downloadPdf" class="btn" style="display:none"><i class="fa-solid fa-file-pdf"></i> Download Buku Kas (PDF)</button>
+      <div style="margin-left:auto" class="small">Status Realtime: <span id="realtimeStatus">connected</span></div>
+    </div>
 
-<h3>Daftar Motor</h3>
-<div id="bikeList"></div>
+    <div class="grid" id="motorGrid"></div>
 
-<div id="adminPanel">
-  <h3>Panel Admin</h3>
-  <button id="addBikeBtn">+ Tambah Motor</button>
-  <button id="pdfBtn"><i class="fa-solid fa-file-pdf"></i> Export PDF Buku Kas</button>
+    <div class="user-rentals card" id="userRentals" style="margin-top:18px;display:none">
+      <h4>Riwayat Sewa Anda</h4>
+      <div id="userRentalsList" class="small"></div>
+    </div>
 
-  <h3>Buku Kas</h3>
-  <table>
-    <thead>
-      <tr><th>Motor</th><th>Penyewa</th><th>Durasi</th><th>Total</th><th>Tanggal</th></tr>
-    </thead>
-    <tbody id="kasTable"></tbody>
-  </table>
+  </section>
+
+  <!-- Modal Sewa -->
+  <div id="rentModal" class="modal"><div class="dialog">
+    <h3 id="modalTitle">Form Sewa</h3>
+    <form id="rentForm">
+      <input type="hidden" id="bikeId" />
+      <label>Nama penyewa</label><input id="name" type="text" required />
+      <label>No. HP</label><input id="phone" type="tel" pattern="[0-9+ ]*" required />
+      <label>Durasi sewa (jam)</label><input id="hours" type="number" min="1" value="1" required />
+      <label>Tanggal & Waktu Mulai Sewa</label><input id="startDateTime" type="datetime-local" required />
+      <p class="muted" id="endDateTimePreview">Selesai sewa: -</p>
+      <label>Ketentuan</label>
+      <div class="row">
+        <label style="flex:1"><input id="idKtp" type="checkbox"/> Memiliki KTP</label>
+        <label style="flex:1"><input id="idStudent" type="checkbox"/> Kartu Mahasiswa</label>
+      </div>
+      <label>Tarif</label>
+      <select id="rateSelect">
+        <option value="5000|60000">Standar — Rp 5.000 / jam • Rp 60.000 / 24 jam</option>
+        <option value="10000|70000">Premium — Rp 10.000 / jam • Rp 70.000 / 24 jam</option>
+      </select>
+      <p class="muted" id="pricePreview">Total: Rp 5.000</p>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+        <button type="button" id="closeModal" class="btn gray">Batal</button>
+        <button type="submit" class="btn">Konfirmasi Sewa</button>
+      </div>
+    </form>
+  </div></div>
+
+  <!-- Modal Tambah Motor -->
+  <div id="addBikeModal" class="modal"><div class="dialog">
+    <h3>Tambah Motor Baru</h3>
+    <form id="addBikeForm">
+      <label>Gambar Motor (opsional)</label>
+      <input type="file" id="bikeImageInput" accept="image/*"/>
+      <label>Nama Motor</label>
+      <input type="text" id="bikeNameInput" required/>
+      <label>Tarif per Jam (Rp)</label>
+      <input type="number" id="bikeRateHour" min="1000" required/>
+      <label>Tarif per Hari (Rp)</label>
+      <input type="number" id="bikeRateDay" min="10000" required/>
+      <label>Emoji / Ikon Motor (opsional)</label>
+      <input type="text" id="bikeEmoji" placeholder="🛵 atau 🏍️"/>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+        <button type="button" id="cancelAddBike" class="btn gray">Batal</button>
+        <button type="submit" class="btn">Simpan</button>
+      </div>
+    </form>
+  </div></div>
+
+  <!-- Admin Panel -->
+  <div class="admin-panel card" id="adminPanel">
+    <h3>Halaman Admin — Riwayat Sewa</h3>
+    <div style="overflow:auto;max-height:320px">
+      <table id="rentalTable">
+        <thead><tr><th>Nama</th><th>No HP</th><th>Motor</th><th>Durasi</th><th>Tarif</th><th>Total</th><th>Mulai</th><th>Selesai</th><th>Kembali</th><th>Status</th><th>Aksi</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Made for you — buka file <strong>index.html</strong> di browser. Jangan lupa setting SUPABASE_URL & ANON KEY.</footer>
 </div>
 
-</main>
+<script>
+/* ----------------------------------------
+   KONFIGURASI SUPABASE
+----------------------------------------- */
+const SUPABASE_URL = "https://kiupbqmskhhlvvzuqkal.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpdXBicW1za2hobHZ2enVxa2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMwOTAwNzMsImV4cCI6MjA3ODY2NjA3M30.R8dLWGsma65c-2lvBLv-iY38rso19KiPjECNTy-tfEY";
 
-<footer>
-  Rental Motor — Aman, Mudah, Realtime
-</footer>
+/* FIX: ini cara yang benar! */
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-<script type="module">
-
-// ======================================================
-// SUPABASE INIT
-// ======================================================
-import { createClient } from "https://esm.sh/@supabase/supabase-js";
-
-const SUPABASE_URL = "YOUR_SUPABASE_URL";
-const SUPABASE_ANON = "YOUR_SUPABASE_ANON";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
+/* ----------------------------------------
+   VARIABEL GLOBAL
+----------------------------------------- */
+window.bikes = [];
+window.rentals = [];
+let isAdmin = false;
 
 const ADMIN_EMAIL = "kinkinka90@gmail.com";
 
-// ELEMENT
-const loginBtn = document.getElementById("loginBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const userInfo = document.getElementById("userInfo");
-const adminBtn = document.getElementById("adminBtn");
+const motorGrid = document.getElementById("motorGrid");
+const rentalTableBody = document.querySelector("#rentalTable tbody");
 const adminPanel = document.getElementById("adminPanel");
-const bikeList = document.getElementById("bikeList");
-const kasTable = document.getElementById("kasTable");
-const addBikeBtn = document.getElementById("addBikeBtn");
-const pdfBtn = document.getElementById("pdfBtn");
+const addBikeBtn = document.getElementById("addBike");
+const downloadPdfBtn = document.getElementById("downloadPdf");
+const adminBtn = document.getElementById("adminBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const userInfoEl = document.getElementById("userInfo");
+const userRentalsCard = document.getElementById("userRentals");
+const userRentalsList = document.getElementById("userRentalsList");
 
-let isAdmin = false;
+/* ----------------------------------------
+   HELPER FUNCTIONS
+----------------------------------------- */
+function numberWithDots(x){
+  if(!x) return "0";
+  return String(x).replace(/\B(?=(\d{3})+(?!\d))/g,".");
+}
 
-// ======================================================
-// LOGIN GOOGLE
-// ======================================================
-loginBtn.onclick = async () => {
-  await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.href }
-  });
-};
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g,c=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
 
-logoutBtn.onclick = async () => {
-  await supabase.auth.signOut();
-  location.reload();
-};
-
-// ======================================================
-// AUTH STATE CHANGE
-// ======================================================
-supabase.auth.onAuthStateChange(async (_, session) => {
-  const user = session?.user;
-
-  if (user) {
-    userInfo.textContent = "Login sebagai: " + user.email;
-    loginBtn.style.display = "none";
-    logoutBtn.style.display = "inline-block";
-
-    if (user.email === ADMIN_EMAIL) isAdmin = true;
+function toLocal(dt){
+  if(!dt) return "-";
+  try {
+    return new Date(dt).toLocaleString("id-ID",{dateStyle:"short",timeStyle:"short"});
+  } catch {
+    return dt;
   }
-
-  renderAdminPanel();
-  loadBikes();
-  loadKas();
-  watchKasRealtime();
-});
-
-// ======================================================
-// ADMIN PANEL TOGGLE
-// ======================================================
-function renderAdminPanel() {
-  adminPanel.style.display = isAdmin ? "block" : "none";
-  adminBtn.innerHTML = isAdmin
-    ? "<i class='fa-solid fa-lock-open'></i> Admin"
-    : "<i class='fa-solid fa-lock'></i> Admin";
 }
 
-adminBtn.onclick = () => {
-  if (!isAdmin) return alert("Anda bukan admin!");
-  adminPanel.style.display = adminPanel.style.display === "none" ? "block" : "none";
-};
+/* ----------------------------------------
+   RENDER BIKES
+----------------------------------------- */
+function renderBikes(){
+  motorGrid.innerHTML = "";
+  window.bikes.forEach(b=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    
+    const img = b.image_url
+      ? `<img class="motor-thumb" src="${b.image_url}">`
+      : (b.image_emoji || "🛵");
 
-// ======================================================
-// LOAD MOTOR
-// ======================================================
-async function loadBikes() {
-  const { data } = await supabase.from("bikes").select("*").order("id");
-  renderBikes(data || []);
-}
+    card.innerHTML = `
+      <div class="motor-img">${img}</div>
+      <div style="margin-top:10px"><strong>${b.name}</strong></div>
 
-function renderBikes(list) {
-  bikeList.innerHTML = "";
-  list.forEach(m => {
-    let c = document.createElement("div");
-    c.className = "card";
+      <div class="meta">
+        <span class="small">Rp ${numberWithDots(b.rate_hour)}/jam</span>
+        <div class="status ${b.status==="available"?"available":"rented"}">
+          ${b.status==="available"?"Available":"Disewa"}
+        </div>
+      </div>
 
-    c.innerHTML = `
-      <img src="${m.image}">
-      <div>
-        <b>${m.name}</b><br>
-        Rp ${m.hour}/jam — Rp ${m.day}/hari<br><br>
+      <div class="actions">
+        <button class="btn rentBtn" data-id="${b.id}" 
+            ${b.status!=="available"?"disabled":""}>Sewa</button>
+
         ${isAdmin ? `
-        <button onclick="editBike(${m.id})">Edit</button>
-        <button class="red" onclick="deleteBike(${m.id})">Hapus</button>
+          <button class="btn gray editBikeBtn" data-id="${b.id}">
+            <i class="fa-solid fa-pen"></i>
+          </button>
+          <button class="btn danger deleteBikeBtn" data-id="${b.id}">
+            <i class="fa-solid fa-trash"></i>
+          </button>
         ` : ""}
-        <button onclick="rentBike(${m.id})">Sewa</button>
       </div>
     `;
-
-    bikeList.appendChild(c);
+    motorGrid.appendChild(card);
   });
 }
 
-// ======================================================
-// TAMBAH MOTOR
-// ======================================================
-addBikeBtn.onclick = () => {
-  const name = prompt("Nama motor:");
-  const hour = prompt("Tarif per jam:");
-  const day = prompt("Tarif per hari:");
+/* ----------------------------------------
+   RENDER RENTAL TABLE (ADMIN)
+----------------------------------------- */
+function renderRentalTable(){
+  rentalTableBody.innerHTML = "";
 
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "image/*";
+  window.rentals.slice().reverse().forEach(r=>{
+    const row = document.createElement("tr");
 
-  fileInput.onchange = e => {
-    const file = e.target.files[0];
-    const reader = new FileReader();
+    row.innerHTML = `
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.phone)}</td>
+      <td>${escapeHtml(r.bike_name)}</td>
+      <td>${r.hours}</td>
+      <td>Rp ${numberWithDots(r.rate_hour)}/jam</td>
+      <td>Rp ${numberWithDots(r.total)}</td>
+      <td>${toLocal(r.startTime)}</td>
+      <td>${toLocal(r.endTime)}</td>
+      <td>${toLocal(r.returnTime)}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>
+        ${r.status==="Disewa" ? `
+          <button class="btn completeRentalBtn" data-id="${r.id}" data-bike="${r.bike_id}">
+            Selesai
+          </button>
+        ` : ""}
 
-    reader.onload = async ev => {
-      await supabase.from("bikes").insert({
-        name, hour, day, image: ev.target.result
-      });
-      loadBikes();
-    };
+        <button class="btn gray editRentalBtn" data-id="${r.id}">
+          <i class="fa-solid fa-pen"></i>
+        </button>
 
-    reader.readAsDataURL(file);
-  };
-
-  fileInput.click();
-};
-
-// ======================================================
-// EDIT MOTOR
-// ======================================================
-window.editBike = async (id) => {
-  const { data } = await supabase.from("bikes").select("*").eq("id", id).single();
-  if (!data) return;
-
-  const name = prompt("Nama baru:", data.name) || data.name;
-  const hour = prompt("Tarif per jam:", data.hour) || data.hour;
-  const day = prompt("Tarif per hari:", data.day) || data.day;
-
-  let img = data.image;
-
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "image/*";
-
-  fileInput.onchange = e => {
-    const file = e.target.files[0];
-    if (file) {
-      const r = new FileReader();
-      r.onload = async ev => {
-        img = ev.target.result;
-        await updateBike();
-      };
-      r.readAsDataURL(file);
-    } else updateBike();
-  };
-
-  fileInput.click();
-
-  async function updateBike() {
-    await supabase.from("bikes").update({
-      name, hour, day, image: img
-    }).eq("id", id);
-
-    loadBikes();
-    alert("Motor diperbarui!");
-  }
-};
-
-// ======================================================
-// HAPUS MOTOR
-// ======================================================
-window.deleteBike = async (id) => {
-  if (!confirm("Hapus motor?")) return;
-  await supabase.from("bikes").delete().eq("id", id);
-  loadBikes();
-};
-
-// ======================================================
-// SEWA MOTOR → MASUK BUKU KAS
-// ======================================================
-window.rentBike = async (id) => {
-  const penyewa = prompt("Nama penyewa:");
-  const durasi = prompt("Durasi:");
-  const total = prompt("Total bayar:");
-
-  await supabase.from("kas").insert({
-    bike_id: id,
-    penyewa, durasi, total,
-    tanggal: new Date().toISOString()
-  });
-
-  alert("Penyewaan dicatat!");
-};
-
-// ======================================================
-// LOAD KAS
-// ======================================================
-async function loadKas() {
-  const { data } = await supabase
-    .from("kas")
-    .select("*, bikes(name)")
-    .order("id");
-
-  renderKas(data || []);
-}
-
-function renderKas(list) {
-  kasTable.innerHTML = "";
-  list.forEach(k => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${k.bikes.name}</td>
-      <td>${k.penyewa}</td>
-      <td>${k.durasi}</td>
-      <td>Rp ${k.total}</td>
-      <td>${new Date(k.tanggal).toLocaleString()}</td>
+        <button class="btn danger deleteRentalBtn" data-id="${r.id}" data-bike="${r.bike_id}">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </td>
     `;
-    kasTable.appendChild(tr);
+    rentalTableBody.appendChild(row);
   });
 }
 
-// ======================================================
-// REALTIME KAS
-// ======================================================
-function watchKasRealtime() {
-  supabase
-    .channel("kas-realtime")
-    .on("postgres_changes", { event:"*", schema:"public", table:"kas" },
-        () => loadKas())
+/* ----------------------------------------
+   RENDER RENTAL USER SENDIRI
+----------------------------------------- */
+function renderUserRentals(email){
+  const list = window.rentals.filter(r => r.user_email === email);
+
+  if(list.length === 0){
+    userRentalsList.innerHTML = "Belum ada riwayat.";
+    userRentalsCard.style.display = "block";
+    return;
+  }
+
+  userRentalsList.innerHTML = list.map(r =>
+    `<div><strong>${r.bike_name}</strong> — ${r.status} — ${toLocal(r.startTime)}</div>`
+  ).join("");
+
+  userRentalsCard.style.display = "block";
+}
+
+/* ----------------------------------------
+   LOAD DATA (FIXED)
+----------------------------------------- */
+async function loadData(){
+  const { data: bikes } = await supabase.from("bikes").select("*").order("id");
+  const { data: rentals } = await supabase.from("rentals").select("*").order("id");
+
+  window.bikes = bikes || [];
+  window.rentals = rentals || [];
+
+  renderBikes();
+  renderRentalTable();
+
+  subscribeRealtime();
+}
+
+loadData();
+
+/* ----------------------------------------
+   REALTIME FIX
+----------------------------------------- */
+function subscribeRealtime(){
+  supabase.channel("bikes")
+    .on("postgres_changes",{event:"*",schema:"public",table:"bikes"}, payload=>{
+      if(payload.eventType==="INSERT") window.bikes.push(payload.record);
+      if(payload.eventType==="UPDATE"){
+        const i = window.bikes.findIndex(b=>b.id===payload.record.id);
+        if(i>-1) window.bikes[i] = payload.record;
+      }
+      if(payload.eventType==="DELETE"){
+        window.bikes = window.bikes.filter(b=>b.id!==payload.old_record.id);
+      }
+      renderBikes();
+    })
+    .subscribe();
+
+  supabase.channel("rentals")
+    .on("postgres_changes",{event:"*",schema:"public",table:"rentals"}, payload=>{
+      if(payload.eventType==="INSERT") window.rentals.push(payload.record);
+      if(payload.eventType==="UPDATE"){
+        const i = window.rentals.findIndex(r=>r.id===payload.record.id);
+        if(i>-1) window.rentals[i] = payload.record;
+      }
+      if(payload.eventType==="DELETE"){
+        window.rentals = window.rentals.filter(r=>r.id!==payload.old_record.id);
+      }
+      renderRentalTable();
+    })
     .subscribe();
 }
-
-// ======================================================
-// EXPORT PDF
-// ======================================================
-pdfBtn.onclick = () => {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  doc.text("Laporan Buku Kas Rental Motor", 10, 10);
-
-  let y = 20;
-  [...kasTable.children].forEach(row => {
-    const cols = [...row.children].map(td => td.textContent).join(" | ");
-    doc.text(cols, 10, y);
-    y += 10;
-  });
-
-  doc.save("buku-kas.pdf");
-};
 
 </script>
 
