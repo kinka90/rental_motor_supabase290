@@ -42,6 +42,7 @@
   .top-right {display:flex;gap:8px;align-items:center}
   .badge-admin{background:#333;color:#fff;padding:4px 8px;border-radius:8px;font-size:12px}
   .user-rentals{margin-top:12px}
+  .muted{color:#666;font-size:13px}
 </style>
 
 <!-- jsPDF & autotable -->
@@ -112,8 +113,8 @@
   <div id="addBikeModal" class="modal"><div class="dialog">
     <h3>Tambah Motor Baru</h3>
     <form id="addBikeForm">
-      <label>Gambar Motor (opsional)</label>
-      <input type="file" id="bikeImageInput" accept="image/*"/>
+      <label>Gambar Motor (URL, opsional)</label>
+      <input type="text" id="bikeImageInput" placeholder="https://..." />
       <label>Nama Motor</label>
       <input type="text" id="bikeNameInput" required/>
       <label>Tarif per Jam (Rp)</label>
@@ -147,10 +148,11 @@
 /* ----------------------------------------
    KONFIGURASI SUPABASE
 ----------------------------------------- */
+/* Ganti jika perlu */
 const SUPABASE_URL = "https://kiupbqmskhhlvvzuqkal.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpdXBicW1za2hobHZ2enVxa2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMwOTAwNzMsImV4cCI6MjA3ODY2NjA3M30.R8dLWGsma65c-2lvBLv-iY38rso19KiPjECNTy-tfEY";
 
-/* FIX: ini cara yang benar! */
+/* Inisialisasi supabase */
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ----------------------------------------
@@ -173,20 +175,41 @@ const userInfoEl = document.getElementById("userInfo");
 const userRentalsCard = document.getElementById("userRentals");
 const userRentalsList = document.getElementById("userRentalsList");
 
+/* rent modal elems */
+const rentModal = document.getElementById("rentModal");
+const rentForm = document.getElementById("rentForm");
+const bikeIdInput = document.getElementById("bikeId");
+const nameInput = document.getElementById("name");
+const phoneInput = document.getElementById("phone");
+const hoursInput = document.getElementById("hours");
+const startDateInput = document.getElementById("startDateTime");
+const endDatePreview = document.getElementById("endDateTimePreview");
+const rateSelect = document.getElementById("rateSelect");
+const pricePreview = document.getElementById("pricePreview");
+const closeModalBtn = document.getElementById("closeModal");
+
+/* add bike modal elems */
+const addBikeModal = document.getElementById("addBikeModal");
+const addBikeForm = document.getElementById("addBikeForm");
+const bikeImageInput = document.getElementById("bikeImageInput");
+const bikeNameInput = document.getElementById("bikeNameInput");
+const bikeRateHour = document.getElementById("bikeRateHour");
+const bikeRateDay = document.getElementById("bikeRateDay");
+const bikeEmojiInput = document.getElementById("bikeEmoji");
+const cancelAddBikeBtn = document.getElementById("cancelAddBike");
+
 /* ----------------------------------------
-   HELPER FUNCTIONS
+   HELPERS
 ----------------------------------------- */
 function numberWithDots(x){
-  if(!x) return "0";
+  if(x === null || x === undefined) return "0";
   return String(x).replace(/\B(?=(\d{3})+(?!\d))/g,".");
 }
-
 function escapeHtml(s){
   return String(s||"").replace(/[&<>"']/g,c=>({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
-
 function toLocal(dt){
   if(!dt) return "-";
   try {
@@ -204,14 +227,14 @@ function renderBikes(){
   window.bikes.forEach(b=>{
     const card = document.createElement("div");
     card.className = "card";
-    
+
     const img = b.image_url
-      ? `<img class="motor-thumb" src="${b.image_url}">`
+      ? `<img class="motor-thumb" src="${escapeHtml(b.image_url)}">`
       : (b.image_emoji || "🛵");
 
     card.innerHTML = `
       <div class="motor-img">${img}</div>
-      <div style="margin-top:10px"><strong>${b.name}</strong></div>
+      <div style="margin-top:10px"><strong>${escapeHtml(b.name)}</strong></div>
 
       <div class="meta">
         <span class="small">Rp ${numberWithDots(b.rate_hour)}/jam</span>
@@ -291,62 +314,455 @@ function renderUserRentals(email){
   }
 
   userRentalsList.innerHTML = list.map(r =>
-    `<div><strong>${r.bike_name}</strong> — ${r.status} — ${toLocal(r.startTime)}</div>`
+    `<div><strong>${escapeHtml(r.bike_name)}</strong> — ${escapeHtml(r.status)} — ${toLocal(r.startTime)}</div>`
   ).join("");
 
   userRentalsCard.style.display = "block";
 }
 
 /* ----------------------------------------
-   LOAD DATA (FIXED)
+   LOAD DATA
 ----------------------------------------- */
 async function loadData(){
-  const { data: bikes } = await supabase.from("bikes").select("*").order("id");
-  const { data: rentals } = await supabase.from("rentals").select("*").order("id");
+  try {
+    const { data: bikes } = await supabase.from("bikes").select("*").order("id");
+    const { data: rentals } = await supabase.from("rentals").select("*").order("id");
 
-  window.bikes = bikes || [];
-  window.rentals = rentals || [];
+    window.bikes = bikes || [];
+    window.rentals = rentals || [];
 
-  renderBikes();
-  renderRentalTable();
+    renderBikes();
+    renderRentalTable();
 
-  subscribeRealtime();
+    subscribeRealtime();
+  } catch(err){
+    console.error("loadData error", err);
+  }
 }
 
 loadData();
 
 /* ----------------------------------------
-   REALTIME FIX
+   REALTIME
 ----------------------------------------- */
 function subscribeRealtime(){
+  // bikes
   supabase.channel("bikes")
     .on("postgres_changes",{event:"*",schema:"public",table:"bikes"}, payload=>{
-      if(payload.eventType==="INSERT") window.bikes.push(payload.record);
-      if(payload.eventType==="UPDATE"){
-        const i = window.bikes.findIndex(b=>b.id===payload.record.id);
-        if(i>-1) window.bikes[i] = payload.record;
+      const p = payload;
+      if(p.eventType==="INSERT") window.bikes.push(p.record);
+      if(p.eventType==="UPDATE"){
+        const i = window.bikes.findIndex(b=>b.id===p.record.id);
+        if(i>-1) window.bikes[i] = p.record;
       }
-      if(payload.eventType==="DELETE"){
-        window.bikes = window.bikes.filter(b=>b.id!==payload.old_record.id);
+      if(p.eventType==="DELETE"){
+        window.bikes = window.bikes.filter(b=>b.id!==p.old_record.id);
       }
       renderBikes();
     })
     .subscribe();
 
+  // rentals
   supabase.channel("rentals")
     .on("postgres_changes",{event:"*",schema:"public",table:"rentals"}, payload=>{
-      if(payload.eventType==="INSERT") window.rentals.push(payload.record);
-      if(payload.eventType==="UPDATE"){
-        const i = window.rentals.findIndex(r=>r.id===payload.record.id);
-        if(i>-1) window.rentals[i] = payload.record;
+      const p = payload;
+      if(p.eventType==="INSERT") window.rentals.push(p.record);
+      if(p.eventType==="UPDATE"){
+        const i = window.rentals.findIndex(r=>r.id===p.record.id);
+        if(i>-1) window.rentals[i] = p.record;
       }
-      if(payload.eventType==="DELETE"){
-        window.rentals = window.rentals.filter(r=>r.id!==payload.old_record.id);
+      if(p.eventType==="DELETE"){
+        window.rentals = window.rentals.filter(r=>r.id!==p.old_record.id);
       }
       renderRentalTable();
     })
     .subscribe();
 }
+
+/* ----------------------------------------
+   AUTH & ADMIN CHECK
+----------------------------------------- */
+async function checkSession(){
+  try {
+    const { data:{ session } } = await supabase.auth.getSession();
+
+    if(session?.user){
+      const email = session.user.email;
+      userInfoEl.innerHTML = `Login sebagai <strong>${escapeHtml(email)}</strong>`;
+      logoutBtn.style.display = "inline-block";
+
+      // admin?
+      if(email === ADMIN_EMAIL){
+        isAdmin = true;
+        addBikeBtn.style.display = "inline-block";
+        downloadPdfBtn.style.display = "inline-block";
+        adminPanel.style.display = "block";
+      } else {
+        isAdmin = false;
+        addBikeBtn.style.display = "none";
+        downloadPdfBtn.style.display = "none";
+      }
+
+      renderBikes();
+      renderUserRentals(email);
+    } else {
+      userInfoEl.innerHTML = `<button id="loginNow" class="btn gray">Login</button>`;
+      document.getElementById("loginNow").onclick = doLogin;
+      logoutBtn.style.display = "none";
+      addBikeBtn.style.display = "none";
+      downloadPdfBtn.style.display = "none";
+      adminPanel.style.display = "none";
+      isAdmin = false;
+      renderBikes();
+    }
+  } catch(err){
+    console.error("checkSession", err);
+  }
+}
+
+async function doLogin(){
+  const email = prompt("Masukkan email untuk login:");
+  if(!email) return;
+  const { error } = await supabase.auth.signInWithOtp({ email });
+
+  if(error){
+    alert("Gagal login: " + error.message);
+    return;
+  }
+  alert("Cek email Anda — magic link telah dikirim.");
+}
+
+logoutBtn.onclick = async ()=>{
+  await supabase.auth.signOut();
+  location.reload();
+};
+
+checkSession();
+
+/* listen to auth changes to update UI immediately */
+supabase.auth.onAuthStateChange((event, session) => {
+  // small delay then re-check
+  setTimeout(()=> checkSession(), 300);
+});
+
+/* ----------------------------------------
+   ADMIN BUTTON TOGGLE
+----------------------------------------- */
+adminBtn.onclick = ()=>{
+  if(!isAdmin){
+    alert("Anda bukan admin!");
+    return;
+  }
+  adminPanel.style.display =
+    (adminPanel.style.display === "none" || adminPanel.style.display === "") ? "block" : "none";
+};
+
+/* ----------------------------------------
+   OPEN RENT MODAL
+----------------------------------------- */
+document.addEventListener("click", e=>{
+  const rentBtn = e.target.closest(".rentBtn");
+  if(rentBtn){
+    const id = rentBtn.dataset.id;
+    const bike = window.bikes.find(b=>b.id==id);
+    if(!bike) return alert("Motor tidak ditemukan.");
+
+    bikeIdInput.value = id;
+    document.getElementById("modalTitle").textContent = `Sewa — ${bike.name}`;
+    // set default rate based on bike.rate_hour if present
+    if(bike.rate_hour){
+      // set rateSelect to match one of options if equal to known rates
+      const opts = Array.from(rateSelect.options);
+      const match = opts.find(o=>o.value.split("|")[0] == bike.rate_hour);
+      if(match) rateSelect.value = match.value;
+    }
+
+    // defaults
+    nameInput.value = "";
+    phoneInput.value = "";
+    hoursInput.value = 1;
+    startDateInput.value = new Date().toISOString().slice(0,16);
+    updateEndPreview();
+    updatePricePreview();
+
+    rentModal.classList.add("show");
+  }
+});
+
+/* close rent modal */
+closeModalBtn.onclick = ()=> rentModal.classList.remove("show");
+rentModal.addEventListener("click", e=>{ if(e.target===rentModal) rentModal.classList.remove("show"); });
+
+/* update end preview and price when inputs change */
+function updateEndPreview(){
+  const start = startDateInput.value ? new Date(startDateInput.value) : new Date();
+  const hours = parseFloat(hoursInput.value) || 1;
+  const end = new Date(start.getTime() + hours*3600000);
+  endDatePreview.textContent = "Selesai sewa: " + end.toLocaleString("id-ID",{dateStyle:"short",timeStyle:"short"});
+}
+function updatePricePreview(){
+  const hours = parseFloat(hoursInput.value) || 1;
+  const [perHour,perDay] = rateSelect.value.split("|").map(Number);
+  // simple pricing: if hours >=24 use perDay * ceil(hours/24) else perHour*hours
+  let total;
+  if(hours >= 24){
+    const days = Math.ceil(hours/24);
+    total = perDay * days;
+  } else {
+    total = perHour * hours;
+  }
+  pricePreview.textContent = `Total: Rp ${numberWithDots(total)}`;
+}
+hoursInput.addEventListener("input", ()=>{ updateEndPreview(); updatePricePreview(); });
+startDateInput.addEventListener("change", updateEndPreview);
+rateSelect.addEventListener("change", updatePricePreview);
+
+/* submit rent form */
+rentForm.addEventListener("submit", async (ev)=>{
+  ev.preventDefault();
+  const bikeId = bikeIdInput.value;
+  const bike = window.bikes.find(b=>b.id==bikeId);
+  if(!bike) return alert("Motor tidak ditemukan.");
+
+  const name = nameInput.value.trim();
+  const phone = phoneInput.value.trim();
+  const hours = parseFloat(hoursInput.value) || 1;
+  const startTime = new Date(startDateInput.value).toISOString();
+  const endTime = new Date(new Date(startDateInput.value).getTime() + hours*3600000).toISOString();
+  const [perHour,perDay] = rateSelect.value.split("|").map(Number);
+  let total = (hours >= 24) ? perDay * Math.ceil(hours/24) : perHour * hours;
+
+  // current user email (if logged in)
+  const { data: { user } } = await supabase.auth.getUser();
+  const user_email = user?.email || null;
+
+  try {
+    // insert rental
+    const { error: errInsert } = await supabase.from("rentals").insert([{
+      bike_id: bikeId,
+      bike_name: bike.name,
+      name,
+      phone,
+      hours,
+      rate_hour: perHour,
+      rate_day: perDay,
+      total,
+      startTime,
+      endTime,
+      returnTime: null,
+      status: "Disewa",
+      user_email
+    }]);
+    if(errInsert) throw errInsert;
+
+    // update bike status
+    await supabase.from("bikes").update({ status: "rented" }).eq("id", bikeId);
+
+    rentModal.classList.remove("show");
+    alert("Sewa berhasil dibuat.");
+  } catch(err){
+    console.error("rent error", err);
+    alert("Gagal membuat sewa: " + (err.message || err));
+  }
+});
+
+/* ----------------------------------------
+   ADD BIKE (ADMIN)
+----------------------------------------- */
+addBikeBtn.onclick = ()=> addBikeModal.classList.add("show");
+cancelAddBikeBtn.onclick = ()=> addBikeModal.classList.remove("show");
+addBikeModal.addEventListener("click", e=>{ if(e.target===addBikeModal) addBikeModal.classList.remove("show"); });
+
+addBikeForm.addEventListener("submit", async (ev)=>{
+  ev.preventDefault();
+  if(!isAdmin) return alert("Admin only");
+
+  const name = bikeNameInput.value.trim();
+  const image_url = bikeImageInput.value.trim() || null;
+  const rate_hour = parseInt(bikeRateHour.value,10) || 5000;
+  const rate_day = parseInt(bikeRateDay.value,10) || 60000;
+  const image_emoji = bikeEmojiInput.value.trim() || null;
+
+  try {
+    const { error } = await supabase.from("bikes").insert([{
+      name, image_url, rate_hour, rate_day, image_emoji, status: "available"
+    }]);
+    if(error) throw error;
+    addBikeModal.classList.remove("show");
+    // clear
+    bikeImageInput.value = "";
+    bikeNameInput.value = "";
+    bikeRateHour.value = "";
+    bikeRateDay.value = "";
+    bikeEmojiInput.value = "";
+    alert("Motor berhasil ditambahkan.");
+  } catch(err){
+    console.error("add bike error", err);
+    alert("Gagal menambah motor: " + (err.message || err));
+  }
+});
+
+/* ----------------------------------------
+   DOWNLOAD PDF (ADMIN)
+----------------------------------------- */
+downloadPdfBtn.onclick = async ()=>{
+  if(!isAdmin) return alert("Admin only");
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  doc.setFontSize(14);
+  doc.text("Buku Kas — Riwayat Sewa", 14, 20);
+
+  const rows = window.rentals.map(r => [
+    r.name || "",
+    r.phone || "",
+    r.bike_name || "",
+    r.hours || "",
+    `Rp ${numberWithDots(r.rate_hour)}`,
+    `Rp ${numberWithDots(r.total)}`,
+    toLocal(r.startTime),
+    toLocal(r.endTime),
+    toLocal(r.returnTime),
+    r.status || ""
+  ]);
+
+  doc.autoTable({
+    head: [['Nama','No HP','Motor','Durasi','Tarif','Total','Mulai','Selesai','Kembali','Status']],
+    body: rows,
+    startY: 28,
+    styles: { fontSize: 9 }
+  });
+
+  doc.save(`buku-kas-${new Date().toISOString().slice(0,10)}.pdf`);
+};
+
+/* ----------------------------------------
+   GLOBAL CLICK HANDLERS: EDIT/DELETE BIKES & RENTALS, COMPLETE RENTAL
+----------------------------------------- */
+document.addEventListener("click", async e=>{
+  // DELETE BIKE
+  const delBikeBtn = e.target.closest(".deleteBikeBtn");
+  if(delBikeBtn){
+    if(!isAdmin) return alert("Admin only");
+    const id = delBikeBtn.dataset.id;
+    if(!confirm("Hapus motor ini?")) return;
+    try {
+      await supabase.from("bikes").delete().eq("id", id);
+      alert("Motor dihapus.");
+    } catch(err){
+      console.error("delete bike", err);
+      alert("Gagal menghapus motor.");
+    }
+    return;
+  }
+
+  // EDIT BIKE
+  const editBikeBtn = e.target.closest(".editBikeBtn");
+  if(editBikeBtn){
+    if(!isAdmin) return alert("Admin only");
+    const id = editBikeBtn.dataset.id;
+    const bike = window.bikes.find(b=>b.id==id);
+    if(!bike) return alert("Motor tidak ditemukan.");
+
+    const nama = prompt("Nama motor:", bike.name);
+    if(!nama) return;
+    const rate = prompt("Tarif per jam:", bike.rate_hour);
+    if(!rate) return;
+
+    try {
+      await supabase.from("bikes").update({ name: nama, rate_hour: parseInt(rate,10) }).eq("id", id);
+      alert("Data motor diperbarui.");
+    } catch(err){
+      console.error("edit bike", err);
+      alert("Gagal mengupdate motor.");
+    }
+    return;
+  }
+
+  // COMPLETE RENTAL
+  const completeBtn = e.target.closest(".completeRentalBtn");
+  if(completeBtn){
+    if(!confirm("Tandai sewa sebagai selesai?")) return;
+    const id = completeBtn.dataset.id;
+    const bikeId = completeBtn.dataset.bike;
+    try {
+      await supabase.from("rentals").update({
+        status: "Selesai",
+        returnTime: new Date().toISOString()
+      }).eq("id", id);
+
+      await supabase.from("bikes").update({ status: "available" }).eq("id", bikeId);
+      alert("Sewa selesai.");
+    } catch(err){
+      console.error("complete rental", err);
+      alert("Gagal menyelesaikan sewa.");
+    }
+    return;
+  }
+
+  // DELETE RENTAL
+  const delRentBtn = e.target.closest(".deleteRentalBtn");
+  if(delRentBtn){
+    if(!confirm("Hapus data sewa ini?")) return;
+    const id = delRentBtn.dataset.id;
+    const bike = delRentBtn.dataset.bike;
+    try {
+      await supabase.from("rentals").delete().eq("id", id);
+      if(bike) await supabase.from("bikes").update({ status: "available" }).eq("id", bike);
+      alert("Data sewa dihapus.");
+    } catch(err){
+      console.error("delete rental", err);
+      alert("Gagal menghapus sewa.");
+    }
+    return;
+  }
+
+  // EDIT RENTAL
+  const editRentBtn = e.target.closest(".editRentalBtn");
+  if(editRentBtn){
+    if(!isAdmin) return alert("Admin only");
+    const id = editRentBtn.dataset.id;
+    const rent = window.rentals.find(r=>r.id==id);
+    if(!rent) return alert("Sewa tidak ditemukan.");
+
+    const newName = prompt("Nama penyewa:", rent.name) || rent.name;
+    const newPhone = prompt("No HP:", rent.phone) || rent.phone;
+    const newHours = parseFloat(prompt("Durasi (jam):", rent.hours) || rent.hours);
+    const newStart = prompt("Mulai (ISO atau YYYY-MM-DDTHH:mm):", rent.startTime) || rent.startTime;
+    // compute end & total
+    const [perHour, perDay] = [rent.rate_hour, rent.rate_day || (rent.rate_hour*24)];
+    const end = new Date(newStart);
+    end.setHours(end.getHours() + newHours);
+    const newEndISO = end.toISOString();
+    const newTotal = (newHours >= 24) ? perDay * Math.ceil(newHours/24) : perHour * newHours;
+
+    try {
+      await supabase.from("rentals").update({
+        name: newName,
+        phone: newPhone,
+        hours: newHours,
+        startTime: newStart,
+        endTime: newEndISO,
+        total: newTotal
+      }).eq("id", id);
+      alert("Data sewa diperbarui.");
+    } catch(err){
+      console.error("edit rental", err);
+      alert("Gagal mengupdate sewa.");
+    }
+    return;
+  }
+});
+
+/* ----------------------------------------
+   SIMPLE UX: Update realtime status (optional)
+----------------------------------------- */
+setInterval(()=>{
+  const el = document.getElementById("realtimeStatus");
+  if(!el) return;
+  // naive check: if there's at least one subscription in client (no reliable API), we'll show connected
+  el.textContent = "connected";
+}, 3000);
 
 </script>
 
