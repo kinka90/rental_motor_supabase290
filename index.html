@@ -70,7 +70,6 @@ input, select {
 }
 
 .muted { color:#777; font-size:12px; }
-
 </style>
 
 <!-- ===== SUPABASE ===== -->
@@ -170,7 +169,6 @@ input, select {
 // =========================================================
 const SUPABASE_URL = "https://kiupbqmskhhlvvzuqkal.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpdXBicW1za2hobHZ2enVxa2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMwOTAwNzMsImV4cCI6MjA3ODY2NjA3M30.R8dLWGsma65c-2lvBLv-iY38rso19KiPjECNTy-tfEY";
-
 const ADMIN_EMAIL = "kinkinka90@gmail.com";
 
 const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -179,9 +177,12 @@ const supa = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // GOOGLE LOGIN
 // =========================================================
 async function loginGoogle() {
-  const { data, error } = await supa.auth.signInWithOAuth({
-    provider: "google"
-  });
+  try {
+    const { data, error } = await supa.auth.signInWithOAuth({ provider: "google" });
+    if (error) console.error("Login error:", error.message);
+  } catch(err) {
+    console.error(err);
+  }
 }
 
 async function logout() {
@@ -189,7 +190,10 @@ async function logout() {
   location.reload();
 }
 
-supa.auth.onAuthStateChange((event, session) => {
+// =========================================================
+// AUTH STATE CHANGE
+// =========================================================
+supa.auth.onAuthStateChange(async (event, session) => {
   if (session?.user) {
     document.getElementById("loginPanel").classList.add("hidden");
     document.getElementById("dashboard").classList.remove("hidden");
@@ -199,10 +203,10 @@ supa.auth.onAuthStateChange((event, session) => {
       document.getElementById("adminPanel").classList.remove("hidden");
     }
 
-    loadMotors();
-    loadUserHistory();
-    loadAllRentals();
-    loadRentOptions();
+    await loadMotors();
+    await loadUserHistory();
+    await loadAllRentals();
+    await loadRentOptions();
   }
 });
 
@@ -222,29 +226,21 @@ function showSection(id) {
 async function addMotor() {
   const name = bikeName.value.trim();
   const plate = bikePlate.value.trim();
+  if (!name || !plate) { resultAddMotor.innerHTML="Semua field wajib diisi"; return; }
 
-  if (!name || !plate) {
-    resultAddMotor.innerHTML = "Semua field wajib diisi";
-    return;
-  }
-
-  await supa.from("bikes").insert({
-    name, plate, available:true
-  });
-
-  resultAddMotor.innerHTML = "Motor berhasil ditambah!";
-  loadMotors();
-  loadRentOptions();
+  await supa.from("bikes").insert({ name, plate, available:true });
+  resultAddMotor.innerHTML="Motor berhasil ditambah!";
+  bikeName.value = bikePlate.value = "";
+  await loadMotors();
+  await loadRentOptions();
 }
 
 async function loadMotors() {
   const { data } = await supa.from("bikes").select();
-
   motorList.innerHTML = data.map(b=>`
     <div class="card">
       <b>${b.name}</b> (${b.plate})<br>
-      Status: ${b.available ? "Tersedia" : "Dipakai"}
-      <br><br>
+      Status: ${b.available ? "Tersedia" : "Dipakai"}<br><br>
       <button onclick="deleteMotor(${b.id})">Hapus</button>
     </div>
   `).join("");
@@ -252,8 +248,8 @@ async function loadMotors() {
 
 async function deleteMotor(id) {
   await supa.from("bikes").delete().eq("id", id);
-  loadMotors();
-  loadRentOptions();
+  await loadMotors();
+  await loadRentOptions();
 }
 
 // =========================================================
@@ -261,50 +257,42 @@ async function deleteMotor(id) {
 // =========================================================
 async function loadRentOptions() {
   const { data } = await supa.from("bikes").select().eq("available", true);
-
-  rentBikeSelect.innerHTML =
-    data.map(b => `<option value="${b.id}">${b.name} (${b.plate})</option>`).join("");
+  rentBikeSelect.innerHTML = data.map(b=>`<option value="${b.id}">${b.name} (${b.plate})</option>`).join("");
 }
 
 async function rentMotor() {
   const bikeId = rentBikeSelect.value;
   const renter = rentName.value.trim();
   const hours = parseInt(rentHours.value);
+  if (!renter || !hours) { resultRent.innerHTML="Semua field wajib diisi"; return; }
 
-  if (!renter || !hours) {
-    resultRent.innerHTML = "Semua field wajib diisi";
-    return;
-  }
-
+  const user = (await supa.auth.getUser()).data.user;
   await supa.from("rentals").insert({
     bike_id: bikeId,
     renter_name: renter,
     hours,
-    status: "ongoing",
-    user_email: (await supa.auth.getUser()).data.user.email
+    status:"ongoing",
+    user_email: user.email
   });
 
-  // update motor tidak tersedia
   await supa.from("bikes").update({ available:false }).eq("id", bikeId);
-
-  resultRent.innerHTML = "Sewa berhasil!";
-  loadMotors();
-  loadRentOptions();
-  loadUserHistory();
-  loadAllRentals();
+  resultRent.innerHTML="Sewa berhasil!";
+  rentName.value = rentHours.value = "";
+  await loadMotors();
+  await loadRentOptions();
+  await loadUserHistory();
+  await loadAllRentals();
 }
 
 // =========================================================
-// RIWAYAT USER SENDIRI
+// RIWAYAT USER
 // =========================================================
 async function loadUserHistory() {
   const user = (await supa.auth.getUser()).data.user;
-
   const { data } = await supa.from("rentals")
     .select("*, bikes(*)")
     .eq("user_email", user.email)
-    .order("id", { ascending:false });
-
+    .order("id",{ascending:false});
   myHistoryList.innerHTML = data.map(r=>`
     <div class="card">
       <b>${r.bikes.name}</b> (${r.bikes.plate})<br>
@@ -318,37 +306,31 @@ async function loadUserHistory() {
 // ADMIN – SEMUA TRANSAKSI
 // =========================================================
 async function loadAllRentals() {
-  const { data } = await supa.from("rentals").select("*, bikes(*)").order("id", { ascending:false });
-
+  const { data } = await supa.from("rentals").select("*, bikes(*)").order("id",{ascending:false});
   adminRentalList.innerHTML = data.map(r=>`
     <div class="card">
       <b>${r.bikes.name}</b> (${r.bikes.plate})<br>
       Penyewa: ${r.renter_name}<br>
       Durasi: ${r.hours} jam<br>
       Status: ${r.status}<br><br>
-
-      ${r.status === "ongoing" ? `
-        <button onclick="finishRental(${r.id}, ${r.bike_id})">Selesai</button>
-      ` : ""}
-
+      ${r.status==="ongoing"?`<button onclick="finishRental(${r.id},${r.bike_id})">Selesai</button>`:""}
       <button onclick="deleteRental(${r.id})">Hapus Riwayat</button>
     </div>
   `).join("");
 }
 
-async function finishRental(id, bikeId) {
-  await supa.from("rentals").update({ status:"finished" }).eq("id", id);
-  await supa.from("bikes").update({ available:true }).eq("id", bikeId);
-
-  loadMotors();
-  loadAllRentals();
-  loadUserHistory();
+async function finishRental(id,bikeId) {
+  await supa.from("rentals").update({status:"finished"}).eq("id",id);
+  await supa.from("bikes").update({available:true}).eq("id",bikeId);
+  await loadMotors();
+  await loadAllRentals();
+  await loadUserHistory();
 }
 
 async function deleteRental(id) {
-  await supa.from("rentals").delete().eq("id", id);
-  loadAllRentals();
-  loadUserHistory();
+  await supa.from("rentals").delete().eq("id",id);
+  await loadAllRentals();
+  await loadUserHistory();
 }
 
 // =========================================================
@@ -356,36 +338,34 @@ async function deleteRental(id) {
 // =========================================================
 async function exportDailyPDF() {
   const today = new Date().toISOString().slice(0,10);
-
   const { data } = await supa.from("rentals")
     .select("*, bikes(*)")
-    .gte("created_at", today + " 00:00")
-    .lte("created_at", today + " 23:59");
+    .gte("created_at", today + "T00:00:00")
+    .lte("created_at", today + "T23:59:59");
 
   const doc = new jspdf.jsPDF();
+  doc.setFontSize(16);
   doc.text("Laporan Harian " + today, 10, 10);
-
-  let y = 20;
+  let y=20;
   data.forEach(r=>{
-    doc.text(`${r.bikes.name} (${r.bikes.plate}) - ${r.renter_name} - ${r.status}`, 10, y);
-    y += 10;
+    doc.setFontSize(12);
+    doc.text(`${r.bikes.name} (${r.bikes.plate}) - ${r.renter_name} - ${r.status}`,10,y);
+    y+=10;
   });
-
   doc.save(`laporan_${today}.pdf`);
 }
 
 async function exportAllPDF() {
   const { data } = await supa.from("rentals").select("*, bikes(*)");
-
   const doc = new jspdf.jsPDF();
+  doc.setFontSize(16);
   doc.text("Laporan Semua Transaksi", 10, 10);
-
-  let y = 20;
+  let y=20;
   data.forEach(r=>{
-    doc.text(`${r.bikes.name} (${r.bikes.plate}) - ${r.renter_name} - ${r.status}`, 10, y);
-    y += 10;
+    doc.setFontSize(12);
+    doc.text(`${r.bikes.name} (${r.bikes.plate}) - ${r.renter_name} - ${r.status}`,10,y);
+    y+=10;
   });
-
   doc.save("semua_transaksi.pdf");
 }
 
